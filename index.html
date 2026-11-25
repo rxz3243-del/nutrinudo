@@ -744,7 +744,8 @@ function remoteOtter(o,dt){const px=o.x,py=o.y,bf=NET.cbuf;if(!bf||!bf.length||o
   const now=performance.now();NET.cdly=lerp(NET.cdly||160,jitterDelay(NET.coffs),.04);const rt=now-NET.coff-NET.cdly;
   const eb=bf.filter(e=>e.g===NET.gen&&e.lf===(NET.life||0));if(!eb.length)return;
   const [tx,ty]=sampleBuf(eb,rt,e=>[e.x,e.y,e.vx,e.vy,e.f&1]);smoothTo(o,tx,ty,dt);
-  const s=last,f=s.f;o.vx=s.vx;o.vy=s.vy;o.face=s.face;o.grounded=!!(f&1);o.anchored=!!(f&2);o.climbing=!!(f&4);o.hang=!!(f&8);o.pulled=!!(f&16);o.inWater=!!(f&32);o.reelT=(f&128)?(s.ct||.1):0;o.climbT=(f&4)?(s.ct||.1):0;o.mantleT=(f&256)?(s.mt||.3):0;o.hoisted=!!(f&512);o.walk=s.walk;o.climbPh=s.ph;o.ground=o.grounded?'tile':null;o.airT=o.grounded?0:(o.airT||0)+dt;
+  const s=last,f=s.f;o.vx=s.vx;o.vy=s.vy;o.face=s.face;o.grounded=!!(f&1);o.anchored=!!(f&2);o.climbing=!!(f&4);o.hang=!!(f&8);o.pulled=!!(f&16);o.inWater=!!(f&32);o.reelT=(f&128)?(s.ct||.1):-1;o.climbT=(f&4)?(s.ct||.1):-1;o.mantleT=(f&256)?(s.mt||.3):0;o.hoisted=!!(f&512);o.walk=s.walk;o.climbPh=s.ph;o.ground=o.grounded?'tile':null;
+  if(typeof s.rc==='number'&&((f&4)||(f&8)))ropeCur=Math.min(ropeCur,s.rc+2);o.airT=o.grounded?0:(o.airT||0)+dt;
   o.ddx=o.x-px;o.ddy=o.y-py;o.blink-=dt;if(o.blink<-.12)o.blink=2+Math.random()*3;o.sx=lerp(o.sx,1,.2);o.sy=lerp(o.sy,1,.2);o.happy-=dt;
   const p=o.partner;if(o.reelT>0&&ropeY(p)>ropeY(o)+16){const d=Math.hypot(cx(p)-cx(o),ropeY(p)-ropeY(o));ropeCur=Math.max(34,Math.min(ropeCur,d+2)-50*dt*o.clb/CLIMB)}}
 function solveRope(){
@@ -1702,7 +1703,8 @@ function netTick(dt){
     if(a){const jc=+a[4]||0,gc=+a[5]||0;I.jp=jc!==NET.lastJc?1:0;NET.lastJc=jc;I.gp=gc!==NET.lastGc?1:0;NET.lastGc=gc;I.l=a[0]?1:0;I.r=a[1]?1:0;I.j=a[2]?1:0;I.g=a[3]?1:0}else{I.l=I.r=I.j=I.g=I.jp=I.gp=0}
     if(p2&&p2.peer!==NET.cpeer){NET.cpeer=p2.peer;NET.cbuf=[];NET.coffs=[]}
     const cs=p2&&Array.isArray(p2.presence.st)?p2.presence.st:null;
-    if(cs&&cs[12]!==NET.lastCts){NET.lastCts=cs[12];const nw=performance.now();NET.coffs=(NET.coffs||[]).concat(nw-cs[12]).slice(-60);NET.coff=Math.min(...NET.coffs);NET.cbuf=NET.cbuf||[];NET.cbuf.push({g:cs[0],lf:cs[1],x:cs[2],y:cs[3],vx:cs[4],vy:cs[5],face:cs[6],f:cs[7],walk:cs[8],ph:cs[9],ct:cs[10],mt:cs[11],ts:cs[12]});if(NET.cbuf.length>60)NET.cbuf.shift()}
+    if(cs&&cs[12]!==NET.lastCts){NET.lastCts=cs[12];const nw=performance.now();NET.coffs=(NET.coffs||[]).concat(nw-cs[12]).slice(-60);NET.coff=Math.min(...NET.coffs);NET.cbuf=NET.cbuf||[];NET.cbuf.push({g:cs[0],lf:cs[1],x:cs[2],y:cs[3],vx:cs[4],vy:cs[5],face:cs[6],f:cs[7],walk:cs[8],ph:cs[9],ct:cs[10],mt:cs[11],ts:cs[12],rc:cs[13]});
+      if(cs[0]===NET.gen&&L&&state==='play'&&Array.isArray(cs[14]))for(const k of cs[14]){const f=L.fish[k];if(f&&!f.got){f.got=true;fishGot++;SFX.fish();burst(f.x,f.y,'spark',12);ot[1].happy=.8;updateHud()}}if(NET.cbuf.length>60)NET.cbuf.shift()}
     if(!p2)NET.cbuf=[];
     if(p2&&ot[1]){const lk=unpackLook(p2.presence.lk);if(lk)ot[1].look=lk;applyStats(ot[1],p2.presence.up||{})}
     $('whoA').textContent='tú';$('whoB').textContent=p2?'conectada':'—';
@@ -1714,7 +1716,7 @@ function netTick(dt){
     $('whoA').textContent=host?'conectado':'—';$('whoB').textContent='tú';
     if(host&&host.presence.sq!==NET.lastSq){NET.lastSq=host.presence.sq;applyHost(host.presence,me&&me.peer)}
     NET.spec=!!(host&&host.presence.p2&&me&&host.presence.p2!==me.peer&&performance.now()-NET.joinedAt>2500);NET.pred=!NET.spec&&state!=='online';
-    if(NET.pred&&(state==='play'||state==='paused')&&L&&ot[1]&&performance.now()-(NET.stT||0)>38){NET.stT=performance.now();const o=ot[1],r1=v=>Math.round(v*10)/10;NET.room.presence({st:[NET.gen,NET.myLife||0,r1(o.x),r1(o.y),o.vx|0,o.vy|0,o.face,oflags(o),Math.round(o.walk*100)/100,(o.climbPh||0)+(o.reelPh||0),Math.round(Math.max(0,o.climbing?o.climbT:o.reelT)*100)/100,o.mantleT>0?Math.round(o.mantleT*100)/100:0,Math.round(performance.now())]}).catch(()=>{})}
+    if(NET.pred&&(state==='play'||state==='paused')&&L&&ot[1]&&performance.now()-(NET.stT||0)>38){NET.stT=performance.now();const o=ot[1],r1=v=>Math.round(v*10)/10;NET.room.presence({st:[NET.gen,NET.myLife||0,r1(o.x),r1(o.y),o.vx|0,o.vy|0,o.face,oflags(o),Math.round(o.walk*100)/100,(o.climbPh||0)+(o.reelPh||0),Math.round(Math.max(0,o.climbing?o.climbT:o.reelT)*100)/100,o.mantleT>0?Math.round(o.mantleT*100)/100:0,Math.round(performance.now()),Math.round(ropeCur),(NET.pk||[]).slice(-40)]}).catch(()=>{})}
     const waited=performance.now()-NET.joinedAt;
     if(state==='online'){$('onStatus').textContent=host?(NET.spec?'Esta sala ya tiene 2 jugadores: estás mirando. Puedes crear tu propia sala.':'Conectado con Nilo. Esperando a que elija nivel…'):(waited>8000?'No encontramos la sala '+NET.code+'. Revisa el código o pide que la creen primero.':'Buscando la sala…');$('bOwn').style.display=NET.spec||(!host&&waited>8000)?'':'none'}
     NET.hbT=(NET.hbT||0)-dt;
@@ -1728,20 +1730,20 @@ function applyHost(P,myPeer){
   if(P.st==='lobby'){if(state!=='online'){state='online';showOnline('B');showControls()}return}
   if(!P.s)return;
   if(state==='online'||state==='menu'||state==='levels'||state==='how'){if(P.gen===NET.gen&&L&&LI===P.lv){state='play';showOv(null);showControls()}}
-  if(P.gen!==NET.gen||!L||LI!==P.lv){NET.gen=P.gen;loadLevel(P.lv);state='play';showOv(null);showControls();NET.prev=NET.cur=null;NET.buf=[];NET.offs=[];NET.off=undefined;NET.lastFx=P.fx&&P.fx.length?P.fx[P.fx.length-1][0]:NET.lastFx}
+  if(P.gen!==NET.gen||!L||LI!==P.lv){NET.gen=P.gen;loadLevel(P.lv);state='play';showOv(null);showControls();NET.prev=NET.cur=null;NET.pk=[];NET.buf=[];NET.offs=[];NET.off=undefined;NET.lastFx=P.fx&&P.fx.length?P.fx[P.fx.length-1][0]:NET.lastFx}
   const S=Object.assign({},P.z||{},P.s),now=performance.now();
   if(typeof P.s.ts==='number'){NET.offs=(NET.offs||[]).concat(now-P.s.ts).slice(-60);NET.off=Math.min(...NET.offs);NET.buf=NET.buf||[];NET.buf.push({ts:P.s.ts,o:P.s.o,pl:P.s.pl||[]});if(NET.buf.length>60)NET.buf.shift()}
   if(NET.cur)NET.snapDt=clamp(lerp(NET.snapDt,now-NET.snapT,.2),16,150);
   NET.prev=NET.cur||S;NET.cur=S;NET.snapT=now;
   let revived=false;
-  if(typeof S.rc==='number'&&!(ot[1].reelT>0&&NET.pred))ropeCur=S.rc;
+  if(typeof S.rc==='number'){const o1=ot[1];if(NET.pred&&(o1.reelT>0||o1.climbT>-.8||o1.hang||(!o1.grounded&&!o1.inWater)))ropeCur=Math.min(ropeCur,S.rc+40);else ropeCur=S.rc}
   S.o.forEach((a,i)=>{const o=ot[i],f=a[5],wd=o.dead;if(i===1&&NET.pred){o.dead=!!(f&64);if((wd&&!o.dead)||(typeof S.lf==='number'&&S.lf!==NET.myLife)){o.x=a[0];o.y=a[1];o.vx=o.vy=0;o.climbT=o.reelT=o.mantleT=0;o.climbQ=o.reelQ=0;NET.myLife=S.lf;revived=true}o.happy=Math.max(o.happy||0,a[9]);return}o.vx=a[2];o.vy=a[3];o.face=a[4];o.grounded=!!(f&1);o.anchored=!!(f&2);o.climbing=!!(f&4);o.hang=!!(f&8);o.pulled=!!(f&16);o.inWater=!!(f&32);o.dead=!!(f&64);o.walk=a[6];o.sx=a[7];o.sy=a[8];o.happy=a[9];o.say=a[10]?{txt:a[10],t:a[11]}:null;o.reelT=(f&128)?(a[14]||.1):0;o.climbPh=o.reelPh=0;o.climbPh=a[12]||0;o.climbT=(f&4)?(a[14]||.1):0;o.mantleT=(f&256)?(a[15]||.3):0;o.hoisted=!!(f&512);if(wd&&!o.dead){o.x=a[0];o.y=a[1];revived=true}});
   if(revived){NET.prev=S;initRope()}
   for(const k in S.dr)L.doorOpen[k]=S.dr[k];
   [...String(S.bt||'')].forEach((v,i)=>{if(L.buttons[i])L.buttons[i].on=v==='1'});
   const ck=Object.keys(L.crumbles);[...String(S.cr||'')].forEach((v,i)=>{const c=L.crumbles[ck[i]];if(c)c.st=+v});
   [...String(S.tr||'')].forEach((v,i)=>{if(L.tramps[i])L.tramps[i].sq=v/9});
-  L.fish.forEach((f,i)=>f.got=S.fg[i]==='1');L.checks.forEach((c,i)=>c.on=S.ck[i]==='1');
+  L.fish.forEach((f,i)=>f.got=S.fg[i]==='1'||(NET.pred&&(NET.pk||[]).includes(i)));L.checks.forEach((c,i)=>c.on=S.ck[i]==='1');
   if(S.lk&&S.lk[0]){const a=unpackLook(S.lk[0]);if(a)ot[0].look=a;ot[1].look=save.look[1]}if(S.rp)ropeSkin=S.rp;if(S.rl)ropeL=S.rl;if(typeof S.tt==='number'){L.simT=S.tt;NET.simAt=now}
   L.won=!!S.w;fishGot=S.fish;deaths=S.dth;lvTime=S.tm;L.stars=S.stars;updateHud();
   if(Array.isArray(P.fx))for(const e of P.fx)if(e[0]>NET.lastFx){NET.lastFx=e[0];playFx(e)}
@@ -1761,7 +1763,8 @@ function clientFrame(dt){
   ot[0].ddx=ot[0].x-n0x;ot[0].ddy=ot[0].y-n0y;
   if(NET.pred&&state==='play'&&L){const o=ot[1];
     for(const q of L.plats){if(q.cx===undefined){q.cx=q.x;q.cy=q.y}const dx=q.x-q.cx;q.cx=q.x;q.cy=q.y;if(o.ground===q&&!o.dead){moveX(o,dx);o.y=q.y-o.h}}
-    NET.pacc=Math.min(.1,(NET.pacc||0)+dt);const h=1/120;while(NET.pacc>=h){NET.pacc-=h;if(o.dead)break;o.blk=false;updOtter(o,inp[1],h);ropeShare(1)}}
+    NET.pacc=Math.min(.1,(NET.pacc||0)+dt);const h=1/120;while(NET.pacc>=h){NET.pacc-=h;if(o.dead)break;o.blk=false;updOtter(o,inp[1],h);ropeShare(1)}
+    if(!o.dead){NET.pk=NET.pk||[];L.fish.forEach((f,k)=>{if(!f.got&&Math.hypot(cx(o)-f.x,cy(o)-f.y)<(26+(o.mag||0))){f.got=true;NET.pk.push(k);SFX0.fish();burst0(f.x,f.y,'spark',12);o.happy=.8;fishGot++;updateHud()}})}}
   if(Math.hypot(rope[0].x-cx(ot[0]),rope[0].y-ropeY(ot[0]))>150)initRope();
   if(!ot[0].dead&&!ot[1].dead)updRopeVis(dt);
   updParts(dt);if(state==='play')ambient(dt);
@@ -1802,7 +1805,7 @@ function ambientMenu(dt){if(state==='menu'||state==='levels'||state==='how'){amb
 function menuCam(dt){const s=clamp(Math.min(H/(11*TS),W/(18*TS)),.6,2.6);cam.s=s;const vw=W/s,vh=H/s;cam.x=clamp(60+Math.sin(T*.08)*80,0,L.w*TS-vw);cam.y=clamp(L.h*TS-vh+ (touchMode?0:0),-200,L.h*TS-vh)}
 loadLevel(0);
 requestAnimationFrame(frame);
-window.__dbg0={netPeers:()=>NET.room?NET.room.peers().map(p=>[p.peer,p.sameTab,p.presence.role,p.presence.sq,Object.keys(p.presence).join('|')]):null,render,get save(){return save},renderShop,drawPrev,ITEMS,startLevel,get ot(){return ot},get L(){return L},get state(){return state},inp,step,keys};
+window.__dbg0={netPeers:()=>NET.room?NET.room.peers().map(p=>[p.peer,p.sameTab,p.presence.role,p.presence.sq,Object.keys(p.presence).join('|')]):null,get ropeCur(){return ropeCur},set ropeCur(v){ropeCur=v},render,get save(){return save},renderShop,drawPrev,ITEMS,startLevel,get ot(){return ot},get L(){return L},get state(){return state},inp,step,keys};
 }
 </script>
 </body>
