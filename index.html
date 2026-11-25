@@ -249,7 +249,7 @@ kbd{font:700 14px 'Baloo 2',sans-serif;background:#fff4dc;color:#2b1a0e;border-r
   </div>
 </div>
 
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';document.head.appendChild(s)"></script>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js';document.head.appendChild(s)"></script>
 <script>
 {
 /* ================= BASE ================= */
@@ -1561,31 +1561,33 @@ $('mCoins').textContent=save.coins||0;
 const NET={mode:'local',role:null,R:null,ready:false,room:null,code:'',gen:0,sq:0,p2:null,p2peer:null,host:null,fx:[],fxId:0,lastFx:-1,prev:null,cur:null,snapT:0,snapDt:40,lastSq:-1,sendT:0,jc:0,lastJc:0,lastIn:'',hostSt:'',conn:true,joining:false};
 function pushFx(e){NET.fx.push([++NET.fxId,...e]);if(NET.fx.length>24)NET.fx.shift()}
 
-/* ================= PEER-TO-PEER ROOMS (standalone build) ================= */
-const PEER_CFG={debug:0,config:{iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'},{urls:'stun:global.stun.twilio.com:3478'},{urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},{urls:'turn:openrelay.metered.ca:443',username:'openrelayproject',credential:'openrelayproject'},{urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}]}};
-const PeerNet={join(name,role){return new Promise((res,rej)=>{
-  if(!window.Peer)return rej({code:'nolib'});
-  const hostId='nutrinudo-'+name.replace(/[^a-z0-9-]/g,'');
-  const me={presence:{},peer:null},conns=new Map(),remote=new Map(),cbs=[];let pe=null,connected=false,closed=false,done=false,snapA=Object.freeze([]);
-  const rebuild=()=>{const a=[{peer:me.peer,isMe:true,sameTab:true,by:null,kind:'viewer',guest:false,presence:Object.freeze(Object.assign({},me.presence)),updatedAt:Date.now()}];for(const [k,v] of remote)a.push({peer:k,isMe:false,sameTab:false,by:null,kind:'viewer',guest:false,presence:v.p,updatedAt:v.t});snapA=Object.freeze(a)};
-  const setC=c=>{connected=c;cbs.forEach(f=>{try{f(c)}catch(e){}})};
-  const sendAll=m=>{for(const c of conns.values())if(c.open)try{c.send(m)}catch(e){}};
+/* ================= ONLINE ROOMS VIA RELAY (standalone build) ================= */
+const BROKERS=['wss://broker.emqx.io:8084/mqtt','wss://broker.hivemq.com:8884/mqtt','wss://test.mosquitto.org:8081'];
+let mqP=null;
+function mqttConnect(){if(mqP)return mqP;mqP=(async()=>{for(const url of BROKERS){const c=await new Promise(res=>{let cl;try{cl=mqtt.connect(url,{clientId:'nn_'+Math.random().toString(16).slice(2,12),clean:true,connectTimeout:7000,reconnectPeriod:2000,keepalive:30})}catch(e){return res(null)}let ok=false;const t=setTimeout(()=>{if(!ok){try{cl.end(true)}catch(e){}res(null)}},8000);cl.once('connect',()=>{ok=true;clearTimeout(t);res(cl)});cl.on('error',()=>{})});if(c){c.setMaxListeners&&c.setMaxListeners(50);return c}}mqP=null;return null})();return mqP}
+const PeerNet={join(name,role){return new Promise(async(res,rej)=>{
+  if(!window.mqtt)return rej({code:'nolib'});
+  const cl=await mqttConnect();if(!cl)return rej({code:'upstream_error'});
+  const id='p'+Math.random().toString(36).slice(2,10),base='nutrinudo/v2/'+name.replace(/[^a-z0-9-]/g,'')+'/';
+  const me={presence:{},peer:id},remote=new Map(),cbs=[];let closed=false,snapA=Object.freeze([]),lastPub=0,pend=null;
+  const rebuild=()=>{const a=[{peer:id,isMe:true,sameTab:true,by:null,kind:'viewer',guest:false,presence:Object.freeze(Object.assign({},me.presence)),updatedAt:Date.now()}];for(const [k,v] of remote)a.push({peer:k,isMe:false,sameTab:false,by:null,kind:'viewer',guest:false,presence:v.p,updatedAt:v.t});snapA=Object.freeze(a)};
+  const onMsg=(topic,buf)=>{if(closed||!topic.startsWith(base))return;const parts=topic.slice(base.length).split('/'),pid=parts[1];if(!pid||pid===id)return;
+    if(parts[0]==='p'){try{const p=JSON.parse(String(buf));if(p&&typeof p==='object'){remote.set(pid,{p:Object.freeze(p),t:Date.now()});rebuild()}}catch(e){}}else if(parts[0]==='bye'){remote.delete(pid);rebuild()}};
+  cl.on('message',onMsg);
+  const onC=()=>cbs.forEach(f=>{try{f(true)}catch(e){}}),onX=()=>cbs.forEach(f=>{try{f(false)}catch(e){}});cl.on('connect',()=>{cl.subscribe(base+'+/+',{qos:0});onC()});cl.on('close',onX);
+  cl.subscribe(base+'+/+',{qos:0});
+  const prune=setInterval(()=>{const now=Date.now();let ch=false;for(const [k,v] of remote)if(now-v.t>12000){remote.delete(k);ch=true}if(ch)rebuild()},2000);
+  const flush=()=>{pend=null;lastPub=Date.now();if(!closed&&cl.connected)cl.publish(base+'p/'+id,JSON.stringify(me.presence),{qos:0})};
   const api={name,
-    presence(patch){for(const k in patch){if(patch[k]===null)delete me.presence[k];else me.presence[k]=patch[k]}rebuild();sendAll({t:'p',p:me.presence});return Promise.resolve()},
-    peers:()=>snapA,onConnection(fn){cbs.push(fn);setTimeout(()=>fn(connected),0);return()=>{}},onPeers(){return()=>{}},emit(){return Promise.resolve()},on(){return()=>{}},connected:()=>connected,
-    leave(){closed=true;try{pe&&pe.destroy()}catch(e){}conns.clear();remote.clear();rebuild();return Promise.resolve()}};
-  const wire=(c,key)=>{c.on('data',d=>{if(d&&d.t==='p'&&d.p&&typeof d.p==='object'){remote.set(key,{p:Object.freeze(d.p),t:Date.now()});rebuild()}});c.on('close',()=>{conns.delete(key);remote.delete(key);rebuild();if(role!=='host'){setC(false);if(!closed)setTimeout(connectHost,1500)}});c.on('error',()=>{})};
-  function connectHost(){if(closed||!pe||pe.destroyed)return;const old=conns.get('h');if(old&&old.open)return;const c=pe.connect(hostId,{reliable:true});conns.set('h',c);c.on('open',()=>{setC(true);c.send({t:'p',p:me.presence})});wire(c,hostId)}
-  try{pe=role==='host'?new Peer(hostId,PEER_CFG):new Peer(PEER_CFG)}catch(e){return rej({code:'nolib'})}
-  const to=setTimeout(()=>{if(!done){done=true;try{pe.destroy()}catch(e){}rej({code:'timeout'})}},15000);
-  pe.on('open',id=>{me.peer=id;rebuild();if(role==='host')setC(true);else connectHost();if(!done){done=true;clearTimeout(to);res(api)}});
-  pe.on('connection',c=>{if(role!=='host')return;c.on('open',()=>{conns.set(c.peer,c);c.send({t:'p',p:me.presence})});wire(c,c.peer)});
-  pe.on('disconnected',()=>{if(!closed)try{pe.reconnect()}catch(e){}});
-  pe.on('error',e=>{const t=e&&e.type;if(!done){done=true;clearTimeout(to);try{pe.destroy()}catch(x){}rej({code:t==='unavailable-id'?'taken':t==='browser-incompatible'?'nolib':'upstream_error'});return}if(t==='peer-unavailable'&&role!=='host'&&!closed)setTimeout(connectHost,2500)});
-  setInterval(()=>{if(role!=='host'&&!closed&&!connected)connectHost()},4000);
+    presence(patch){for(const k in patch){if(patch[k]===null)delete me.presence[k];else me.presence[k]=patch[k]}rebuild();const wait=50-(Date.now()-lastPub);if(wait<=0)flush();else if(!pend)pend=setTimeout(flush,wait);return Promise.resolve()},
+    peers:()=>snapA,onConnection(fn){cbs.push(fn);setTimeout(()=>fn(cl.connected),0);return()=>{}},onPeers(){return()=>{}},emit(){return Promise.resolve()},on(){return()=>{}},connected:()=>cl.connected,
+    leave(){if(closed)return Promise.resolve();closed=true;clearInterval(prune);try{cl.publish(base+'bye/'+id,'1',{qos:0});cl.unsubscribe(base+'+/+');cl.removeListener('message',onMsg)}catch(e){}remote.clear();rebuild();return Promise.resolve()}};
+  rebuild();
+  if(role==='host'){await new Promise(r=>setTimeout(r,1500));const taken=[...remote.values()].some(v=>v.p&&v.p.role==='host');if(taken){api.leave();return rej({code:'taken'})}}
+  res(api);
 })}};
 let roomTry=null;
-function acquireRoom(){if(NET.R)return Promise.resolve(NET.R);if(roomTry)return roomTry;roomTry=(async()=>{for(let k=0;k<100&&!window.Peer;k++)await new Promise(r=>setTimeout(r,100));const R=window.Peer?PeerNet:null;if(R)NET.R=R;NET.ready=true;roomTry=null;updOnlineNote();return R})();return roomTry}
+function acquireRoom(){if(NET.R)return Promise.resolve(NET.R);if(roomTry)return roomTry;roomTry=(async()=>{for(let k=0;k<100&&!window.mqtt;k++)await new Promise(r=>setTimeout(r,100));const R=window.mqtt?PeerNet:null;if(R)NET.R=R;NET.ready=true;roomTry=null;updOnlineNote();return R})();return roomTry}
 acquireRoom();
 const NOACC='No se pudo cargar el sistema de conexión. Revisa tu internet y recarga la página.';
 function onNote(t){const n=$('onNote');if(n)n.textContent=t}
@@ -1663,7 +1665,7 @@ function netTick(dt){
     if(p2&&ot[1]){const lk=unpackLook(p2.presence.lk);if(lk)ot[1].look=lk;applyStats(ot[1],p2.presence.up||{})}
     $('whoA').textContent='tú';$('whoB').textContent=p2?'conectada':'—';
     if(state==='online'){const extra=c.length-(p2?1:0);$('onStatus').textContent=p2?'¡Lulú está conectada! Ya pueden jugar.'+(extra>0?` (${extra} mirando)`:''):'Pásale este código a tu compañero y espera a que se una.';$('bChoose').disabled=!p2}
-    NET.sendT-=dt;if(NET.sendT<=0){NET.sendT=1/30;publishHost()}
+    NET.sendT-=dt;if(NET.sendT<=0){NET.sendT=1/20;publishHost()}
   }else{
     const host=ps.find(p=>!p.sameTab&&p.presence&&p.presence.role==='host')||null;NET.host=host;
     const me=ps.find(p=>p.sameTab);
