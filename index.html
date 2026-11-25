@@ -734,12 +734,16 @@ const RN=22;
 function initRope(){rope=[];const a=ot[0],b=ot[1];for(let i=0;i<RN;i++){const t=i/(RN-1),x=lerp(cx(a),cx(b),t),y=lerp(ropeY(a),ropeY(b),t)+Math.sin(t*Math.PI)*20;rope.push({x,y,px:x,py:y})}}
 function invM(o){if(o.dead||o.anchored||o.mantleT>0||(o.partner&&o.partner.mantleT>0&&o.grounded)||(o.grounded&&o.partner&&(o.partner.climbing||o.partner.hang||o.pulled)))return 0;if(o.climbing)return .05;if(o.pulled)return .35;return o.grounded?.25:1}
 function ropeShare(i){const a=ot[0],b=ot[1];if(a.dead||b.dead)return;const me=ot[i];const dx=cx(b)-cx(a),dy=ropeY(b)-ropeY(a),d=Math.hypot(dx,dy);if(d<=ropeCur)return;const wa=invM(a),wb=invM(b),sm=wa+wb;if(!sm)return;const w=(i===0?wa:wb)/sm;if(!w)return;const nx=dx/d,ny=dy/d,df=d-ropeCur,sg=i===0?1:-1,mx=sg*nx*df*w,my=sg*ny*df*w;const bl=moveX(me,mx);moveY(me,my);if(bl&&((i===0&&ny<-.05&&b.reelT>0)||(i===1&&ny>.05&&a.reelT>0))){moveY(me,-Math.min(Math.abs(mx)*1.1,1.2));if(me.vy>0)me.vy=0}const rv=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;if(rv>0){if(i===0){a.vx+=nx*rv*w;a.vy+=ny*rv*w}else{b.vx-=nx*rv*w;b.vy-=ny*rv*w}}}
+function jitterDelay(offs){if(!offs||offs.length<6)return 160;const mn=Math.min(...offs),d=offs.map(v=>v-mn).sort((a,b)=>a-b);return clamp(d[Math.floor(d.length*.9)]+45,70,420)}
+function sampleBuf(bf,rt,get){let a=null,b=null;for(const e of bf){if(e.ts<=rt)a=e;else{b=e;break}}if(!a){a=bf[0];b=null}
+  const A=get(a);if(!b){const ex=clamp((rt-a.ts)/1000,0,.12);return[A[0]+A[2]*ex,A[1]+(A[4]?0:A[3]*ex)]}
+  const B=get(b);if(Math.hypot(B[0]-A[0],B[1]-A[1])>120)return[B[0],B[1]];const k=clamp((rt-a.ts)/Math.max(1,b.ts-a.ts),0,1);return[lerp(A[0],B[0],k),lerp(A[1],B[1],k)]}
+function smoothTo(o,x,y,dt){if(Math.hypot(x-o.x,y-o.y)>100){o.x=x;o.y=y;return}const k=1-Math.exp(-dt*22);o.x+= (x-o.x)*k;o.y+=(y-o.y)*k}
 function remoteOtter(o,dt){const px=o.x,py=o.y,bf=NET.cbuf;if(!bf||!bf.length||o.dead){o.ddx=o.ddy=0;return}const last=bf[bf.length-1];
   if(last.g!==NET.gen||last.lf!==(NET.life||0)){o.ddx=o.ddy=0;return}
-  const now=performance.now(),spr=NET.coffs.length>5?Math.max(...NET.coffs)-NET.coff:150;NET.cdly=lerp(NET.cdly||150,clamp(spr*.8+50,90,320),.05);const rt=now-NET.coff-NET.cdly;
-  let a=null,b=null;for(let i=0;i<bf.length;i++){const e=bf[i];if(e.g!==NET.gen||e.lf!==(NET.life||0))continue;if(e.ts<=rt||!a){a=e;b=e}else if(b===a){b=e}}
-  if(!a)return;const k=b.ts>a.ts?clamp((rt-a.ts)/(b.ts-a.ts),0,1):1;
-  if(Math.hypot(b.x-a.x,b.y-a.y)>120){o.x=b.x;o.y=b.y}else{o.x=lerp(a.x,b.x,k);o.y=lerp(a.y,b.y,k)}
+  const now=performance.now();NET.cdly=lerp(NET.cdly||160,jitterDelay(NET.coffs),.04);const rt=now-NET.coff-NET.cdly;
+  const eb=bf.filter(e=>e.g===NET.gen&&e.lf===(NET.life||0));if(!eb.length)return;
+  const [tx,ty]=sampleBuf(eb,rt,e=>[e.x,e.y,e.vx,e.vy,e.f&1]);smoothTo(o,tx,ty,dt);
   const s=last,f=s.f;o.vx=s.vx;o.vy=s.vy;o.face=s.face;o.grounded=!!(f&1);o.anchored=!!(f&2);o.climbing=!!(f&4);o.hang=!!(f&8);o.pulled=!!(f&16);o.inWater=!!(f&32);o.reelT=(f&128)?(s.ct||.1):0;o.climbT=(f&4)?(s.ct||.1):0;o.mantleT=(f&256)?(s.mt||.3):0;o.hoisted=!!(f&512);o.walk=s.walk;o.climbPh=s.ph;o.ground=o.grounded?'tile':null;o.airT=o.grounded?0:(o.airT||0)+dt;
   o.ddx=o.x-px;o.ddy=o.y-py;o.blink-=dt;if(o.blink<-.12)o.blink=2+Math.random()*3;o.sx=lerp(o.sx,1,.2);o.sy=lerp(o.sy,1,.2);o.happy-=dt;
   const p=o.partner;if(o.reelT>0&&ropeY(p)>ropeY(o)+16){const d=Math.hypot(cx(p)-cx(o),ropeY(p)-ropeY(o));ropeCur=Math.max(34,Math.min(ropeCur,d+2)-50*dt*o.clb/CLIMB)}}
@@ -1613,7 +1617,7 @@ const PeerNet={join(name,role){return new Promise(async(res,rej)=>{
     for(const k in sent)if(!(k in me.presence)){d[k]=null;delete sent[k];n++}
     if(full)lastFull=Date.now();if(!n)return;pub(base+'p/'+id,JSON.stringify({d,n:++seqN,f:full?1:0}),full)};
   const api={name,
-    presence(patch){for(const k in patch){if(patch[k]===null)delete me.presence[k];else me.presence[k]=patch[k]}rebuild();const wait=60-(Date.now()-lastPub);if(wait<=0)flush();else if(!pend)pend=setTimeout(flush,wait);return Promise.resolve()},
+    presence(patch){for(const k in patch){if(patch[k]===null)delete me.presence[k];else me.presence[k]=patch[k]}rebuild();const wait=38-(Date.now()-lastPub);if(wait<=0)flush();else if(!pend)pend=setTimeout(flush,wait);return Promise.resolve()},
     peers:()=>snapA,onConnection(fn){cbs.push(fn);const tk=setInterval(()=>{if(closed)return clearInterval(tk);fn(relaysUp().length>0)},1500);setTimeout(()=>fn(relaysUp().length>0),0);return()=>clearInterval(tk)},onPeers(){return()=>{}},emit(){return Promise.resolve()},on(){return()=>{}},connected:()=>relaysUp().length>0,
     leave(){if(closed)return Promise.resolve();closed=true;clearInterval(prune);try{pub(base+'bye/'+id,'1',true);for(const r of RELAYS){r.subs.delete(sub);if(r.cl.connected)r.cl.unsubscribe(sub)}}catch(e){}relayListeners.delete(onMsg);remote.clear();rebuild();return Promise.resolve()}};
   rebuild();
@@ -1703,14 +1707,14 @@ function netTick(dt){
     if(p2&&ot[1]){const lk=unpackLook(p2.presence.lk);if(lk)ot[1].look=lk;applyStats(ot[1],p2.presence.up||{})}
     $('whoA').textContent='tú';$('whoB').textContent=p2?'conectada':'—';
     if(state==='online'){const extra=c.length-(p2?1:0);$('onStatus').textContent=p2?'¡Lulú está conectada! Ya pueden jugar.'+(extra>0?` (${extra} mirando)`:''):'Pásale este código a tu compañero y espera a que se una.';$('bChoose').disabled=!p2}
-    NET.sendT-=dt;if(NET.sendT<=0){NET.sendT=1/15;publishHost()}
+    NET.sendT-=dt;if(NET.sendT<=0){NET.sendT=1/20;publishHost()}
   }else{
     const host=ps.find(p=>!p.sameTab&&p.presence&&p.presence.role==='host')||null;NET.host=host;
     const me=ps.find(p=>p.sameTab);
     $('whoA').textContent=host?'conectado':'—';$('whoB').textContent='tú';
     if(host&&host.presence.sq!==NET.lastSq){NET.lastSq=host.presence.sq;applyHost(host.presence,me&&me.peer)}
     NET.spec=!!(host&&host.presence.p2&&me&&host.presence.p2!==me.peer&&performance.now()-NET.joinedAt>2500);NET.pred=!NET.spec&&state!=='online';
-    if(NET.pred&&(state==='play'||state==='paused')&&L&&ot[1]&&performance.now()-(NET.stT||0)>45){NET.stT=performance.now();const o=ot[1],r1=v=>Math.round(v*10)/10;NET.room.presence({st:[NET.gen,NET.myLife||0,r1(o.x),r1(o.y),o.vx|0,o.vy|0,o.face,oflags(o),Math.round(o.walk*100)/100,(o.climbPh||0)+(o.reelPh||0),Math.round(Math.max(0,o.climbing?o.climbT:o.reelT)*100)/100,o.mantleT>0?Math.round(o.mantleT*100)/100:0,Math.round(performance.now())]}).catch(()=>{})}
+    if(NET.pred&&(state==='play'||state==='paused')&&L&&ot[1]&&performance.now()-(NET.stT||0)>38){NET.stT=performance.now();const o=ot[1],r1=v=>Math.round(v*10)/10;NET.room.presence({st:[NET.gen,NET.myLife||0,r1(o.x),r1(o.y),o.vx|0,o.vy|0,o.face,oflags(o),Math.round(o.walk*100)/100,(o.climbPh||0)+(o.reelPh||0),Math.round(Math.max(0,o.climbing?o.climbT:o.reelT)*100)/100,o.mantleT>0?Math.round(o.mantleT*100)/100:0,Math.round(performance.now())]}).catch(()=>{})}
     const waited=performance.now()-NET.joinedAt;
     if(state==='online'){$('onStatus').textContent=host?(NET.spec?'Esta sala ya tiene 2 jugadores: estás mirando. Puedes crear tu propia sala.':'Conectado con Nilo. Esperando a que elija nivel…'):(waited>8000?'No encontramos la sala '+NET.code+'. Revisa el código o pide que la creen primero.':'Buscando la sala…');$('bOwn').style.display=NET.spec||(!host&&waited>8000)?'':'none'}
     NET.hbT=(NET.hbT||0)-dt;
@@ -1747,9 +1751,9 @@ function applyHost(P,myPeer){
 function clientFrame(dt){
   T+=dt;introT-=dt;if(L)L.simT+=dt;trailTick(dt);const n0x=ot[0].x,n0y=ot[0].y;
   const A=NET.cur,B=NET.prev,bf=NET.buf;
-  if(bf&&bf.length&&NET.off!==undefined){const sp=NET.offs.length>5?Math.max(...NET.offs)-NET.off:150;NET.dly=lerp(NET.dly||150,clamp(sp*.8+50,90,320),.05);const rt=performance.now()-NET.off-NET.dly;let a=bf[0],b=bf[0];for(let i=0;i<bf.length;i++){if(bf[i].ts<=rt){a=bf[i];b=bf[i+1]||bf[i]}}const k=b.ts>a.ts?clamp((rt-a.ts)/(b.ts-a.ts),0,1):1;
-    b.o.forEach((q,i)=>{if(i===1&&NET.pred)return;const p=a.o[i]||q,o=ot[i];if(Math.hypot(q[0]-p[0],q[1]-p[1])>120){o.x=q[0];o.y=q[1]}else{o.x=lerp(p[0],q[0],k);o.y=lerp(p[1],q[1],k)}});
-    b.pl.forEach((q,i)=>{const p=a.pl[i]||q,pl=L.plats[i];if(pl){pl.x=lerp(p[0],q[0],k);pl.y=lerp(p[1],q[1],k)}});
+  if(bf&&bf.length&&NET.off!==undefined){NET.dly=lerp(NET.dly||160,jitterDelay(NET.offs),.04);const rt=performance.now()-NET.off-NET.dly;
+    for(let i=0;i<2;i++){if(i===1&&NET.pred)continue;const o=ot[i];const [tx,ty]=sampleBuf(bf,rt,e=>{const q=e.o[i];return[q[0],q[1],q[2],q[3],q[5]&1]});smoothTo(o,tx,ty,dt)}
+    const last=bf[bf.length-1];last.pl.forEach((q,i)=>{const pl=L.plats[i];if(!pl)return;const [tx,ty]=sampleBuf(bf,rt,e=>{const r=e.pl[i]||q;return[r[0],r[1],0,0,1]});pl.x=tx;pl.y=ty});
   }else if(A&&B){const k=clamp((performance.now()-NET.snapT)/NET.snapDt,0,1.15);
     A.o.forEach((a,i)=>{if(i===1&&NET.pred)return;const p=B.o[i]||a,o=ot[i];if(Math.hypot(a[0]-p[0],a[1]-p[1])>120){o.x=a[0];o.y=a[1]}else{o.x=lerp(p[0],a[0],k);o.y=lerp(p[1],a[1],k)}});
     A.pl.forEach((a,i)=>{const p=B.pl[i]||a,q=L.plats[i];if(q){q.x=lerp(p[0],a[0],k);q.y=lerp(p[1],a[1],k)}});
